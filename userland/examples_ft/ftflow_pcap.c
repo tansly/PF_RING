@@ -177,11 +177,42 @@ void processFlow(pfring_ft_flow *flow, void *user){
 void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
         pfring_ft_flow *flow, void *user)
 {
-    char proto_name[256];
+    char proto_name[32];
+    pfring_ft_flow_key *flow_key = pfring_ft_flow_get_key(flow);
     pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
     printf("l7: %s, category: %u\n",
 	   pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
-               sizeof(proto_name)), flow_value->l7_protocol.category);
+               sizeof proto_name), flow_value->l7_protocol.category);
+
+    /*
+     * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
+     * IMO this will be good enough for a PoC. We may later port it here if we think it would
+     * provide any benefit.
+     *
+     * TODO: Actually check if the protocol is blocked (after adding relevant command line options).
+     */
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("proto_detected");
+    } else if (pid == 0) {
+        /*
+         * TODO: Get the bmv2 json and p4info as command line arguments instead of hardcoding here.
+         */
+        char buf1[32], buf2[32];
+        char *ip1, *ip2;
+        if (flow_key->ip_version == 4) {
+            ip1 = _intoa(flow_key->saddr.v4, buf1, sizeof(buf1));
+            ip2 = _intoa(flow_key->daddr.v4, buf2, sizeof(buf2));
+            execl("./blocklist_add.py", "./blocklist_add.py",
+                    "/home/vagrant/ntcp4/p4src/ntc.json",
+                    "/home/vagrant/ntcp4/p4src/ntc.p4rt", ip1, ip2, NULL);
+        } else {
+            /*
+             * XXX: Will we support IPv6?
+             */
+            fputs("Got IPv6?", stderr);
+        }
+    } /* else (parent) nothing to do */
 }
 
 /* ****************************************************** */
@@ -284,7 +315,23 @@ int main(int argc, char* argv[]) {
 
   pfring_ft_set_flow_export_callback(ft, processFlow, NULL);
 
+  /*
+   * TODO: Set this callback only if L7 detection is enabled and the required
+   * P4 config files are given as command line arguments.
+   */
   pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
+  pid_t pid = fork();
+  if (pid == -1) {
+      perror("main()");
+  } else if (pid == 0) {
+      /*
+       * TODO: Get the bmv2 json and p4info as command line arguments instead of
+       * hardcoding here. Also see the previous TODO.
+       */
+      execl("./set_pipeline_conf.py", "./set_pipeline_conf.py",
+              "/home/vagrant/ntcp4/p4src/ntc.json",
+              "/home/vagrant/ntcp4/p4src/ntc.p4rt", NULL);
+  } /* else (parent) just continue */
 
   if (protocols_file) {
     rc = pfring_ft_load_ndpi_protocols(ft, protocols_file);
