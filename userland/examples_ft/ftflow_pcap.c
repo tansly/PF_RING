@@ -174,6 +174,14 @@ void processFlow(pfring_ft_flow *flow, void *user){
   pfring_ft_flow_free(flow);
 }
 
+void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
+        pfring_ft_flow *flow, void *user)
+{
+    pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
+    printf("%d %d %d\n", flow_value->l7_protocol.master_protocol,
+            flow_value->l7_protocol.app_protocol, flow_value->l7_protocol.category);
+}
+
 /* ****************************************************** */
 
 void process_packet(u_char *_deviceId, const struct pcap_pkthdr *h, const u_char *p) {
@@ -274,6 +282,7 @@ int main(int argc, char* argv[]) {
 
   pfring_ft_set_flow_export_callback(ft, processFlow, NULL);
 
+  pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
 
   if (protocols_file) {
     rc = pfring_ft_load_ndpi_protocols(ft, protocols_file);
