@@ -177,9 +177,11 @@ void processFlow(pfring_ft_flow *flow, void *user){
 void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
         pfring_ft_flow *flow, void *user)
 {
+    char proto_name[256];
     pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
-    printf("%d %d %d\n", flow_value->l7_protocol.master_protocol,
-            flow_value->l7_protocol.app_protocol, flow_value->l7_protocol.category);
+    printf("l7: %s, category: %u\n",
+	   pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
+               sizeof(proto_name)), flow_value->l7_protocol.category);
 }
 
 /* ****************************************************** */
