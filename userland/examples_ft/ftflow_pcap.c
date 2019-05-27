@@ -183,6 +183,7 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
     char proto_name[32];
     pfring_ft_flow_key *flow_key = pfring_ft_flow_get_key(flow);
     pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
+
     printf("l7: %s, category: %u\n",
 	   pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
                sizeof proto_name), flow_value->l7_protocol.category);
@@ -196,7 +197,8 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
      */
     pid_t pid = fork();
     if (pid == -1) {
-        perror("proto_detected");
+        perror("proto_detected() fork() error");
+        return;
     } else if (pid == 0) {
         char buf1[32], buf2[32];
         char *ip1, *ip2;
@@ -205,13 +207,25 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
             ip2 = _intoa(flow_key->daddr.v4, buf2, sizeof(buf2));
             execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt,
                 ip1, ip2, NULL);
+            /*
+             * exec failed.
+             */
+            perror("proto_detected() exec() error");
+            exit(EXIT_FAILURE);
         } else {
             /*
              * XXX: Will we support IPv6?
              */
             fputs("Got IPv6?", stderr);
+            exit(EXIT_SUCCESS);
         }
-    } /* else (parent) nothing to do */
+    } else /* parent */ {
+      /*
+       * TODO: Wait for the child.
+       * Or set SIGCHLD handler to ignore it.
+       * If the child errors, there is nothing we can do anyway.
+       */
+    }
 }
 
 /* ****************************************************** */
