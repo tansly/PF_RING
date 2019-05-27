@@ -44,6 +44,8 @@
 
 #include "pfring_ft.h"
 
+#include "bstree.h"
+
 #include "ftutils.c"
 
 #define ALARM_SLEEP       1
@@ -53,6 +55,7 @@ pcap_t *pd = NULL;
 pfring_ft_table *ft = NULL;
 u_int8_t quiet = 0, verbose = 0, do_shutdown = 0, enable_l7 = 0, enable_p4 = 0;
 const char *p4rt = NULL, *bmv2_json = NULL;
+struct bstree *blocked_protocols = NULL;
 
 static struct timeval startTime;
 unsigned long long numPkts = 0, numBytes = 0;
@@ -177,6 +180,11 @@ void processFlow(pfring_ft_flow *flow, void *user){
   pfring_ft_flow_free(flow);
 }
 
+int compare_proto_names(const void *lhs, const void *rhs)
+{
+  return strcmp(lhs, rhs);
+}
+
 void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
         pfring_ft_flow *flow, void *user)
 {
@@ -184,16 +192,20 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
   pfring_ft_flow_key *flow_key = pfring_ft_flow_get_key(flow);
   pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
 
-  printf("l7: %s, category: %u\n",
+  printf("Detected: %s\n",
       pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
-        sizeof proto_name), flow_value->l7_protocol.category);
+        sizeof proto_name));
+
+  if (!bstree_search(blocked_protocols, proto_name)) {
+    return;
+  }
+
+  printf("Blocking: %s\n", proto_name);
 
   /*
    * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
    * IMO this will be good enough for a PoC. We may later port it here if we think it would
    * provide any benefit.
-   *
-   * TODO: Actually check if the protocol is blocked.
    */
   pid_t pid = fork();
   if (pid == -1) {
@@ -246,6 +258,9 @@ void process_packet(u_char *_deviceId, const struct pcap_pkthdr *h, const u_char
 
 /* *************************************** */
 
+/*
+ * TODO: Update the help text to include P4 related arguments.
+ */
 void print_help(void) {
   printf("ftflow_pcap - (C) 2018-19 ntop.org\n");
   printf("-h              Print help\n");
@@ -289,19 +304,23 @@ int main(int argc, char* argv[]) {
 
     switch(c) {
     case 'j':
-      // BMv2 JSON file
+      /* Specifies the BMv2 JSON file */
       enable_p4 = 1;
       bmv2_json = optarg;
       break;
     case 'r':
-      // P4 runtime file
+      /* Specifies the P4 runtime file */
       enable_p4 = 1;
       p4rt = optarg;
       break;
     case 'b':
-      // nDPI protocol to be blocked in P4
+      /* Specifies nDPI protocol to be blocked in P4 */
       enable_p4 = 1;
-      // TODO: Parse and store the protocol
+      if (!blocked_protocols) {
+        blocked_protocols = bstree_new(compare_proto_names, NULL);
+      }
+      bstree_insert(blocked_protocols, optarg);
+      break;
     case 'c':
       categories_file = strdup(optarg);
       break;

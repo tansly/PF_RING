@@ -60,8 +60,8 @@ all: ${TARGETS}
 ftflow: ftflow.o ${LIBPFRING}
 	${CC} ${CFLAGS} ftflow.o ${LIBS} -o $@
 
-ftflow_pcap: ftflow_pcap.o ${LIBPFRING}
-	${CC} ${CFLAGS} ftflow_pcap.o ${LIBS} -o $@
+ftflow_pcap: ftflow_pcap.o bstree.o ${LIBPFRING}
+	${CC} ${CFLAGS} ftflow_pcap.o bstree.o ${LIBS} -o $@
 
 fttest: fttest.o ${LIBPFRING}
 	${CC} ${CFLAGS} fttest.o ${LIBS} -o $@
