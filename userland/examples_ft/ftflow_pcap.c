@@ -39,6 +39,7 @@
 #include <netinet/ip6.h>
 #include <net/ethernet.h>     /* the L2 protocols */
 #include <arpa/inet.h>
+#include <getopt.h>
 
 #include "pfring_ft.h"
 
@@ -252,7 +253,7 @@ void print_help(void) {
 /* *************************************** */
 
 int main(int argc, char* argv[]) {
-  char *device = NULL, c, *bpfFilter = NULL;
+  char *device = NULL, *bpfFilter = NULL;
   char errbuf[PCAP_ERRBUF_SIZE];
   char *protocols_file = NULL;
   int promisc, snaplen = DEFAULT_SNAPLEN;
@@ -263,10 +264,23 @@ int main(int argc, char* argv[]) {
  
   startTime.tv_sec = 0;
 
-  while ((c = getopt(argc,argv,"c:hi:vf:p:q7")) != '?') {
-    if ((c == 255) || (c == -1)) break;
+  /*
+   * TODO: Designate short options for these to improve usability.
+   */
+  static struct option long_opts[] = {
+    {"p4info", required_argument, NULL, 0},
+    {"bmv2-json", required_argument, NULL, 0},
+    {"block", required_argument, NULL, 0}
+  };
+  int option_index = 0;
+  int c;
+
+  while ((c = getopt_long(argc, argv, "c:hi:vf:p:q7",
+          long_opts, &option_index)) != '?' && c != -1) {
 
     switch(c) {
+    case '0':
+      break;
     case 'c':
       categories_file = strdup(optarg);
       break;
