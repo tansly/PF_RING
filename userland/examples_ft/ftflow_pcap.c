@@ -25,6 +25,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
@@ -348,10 +349,40 @@ int main(int argc, char* argv[]) {
     pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
     pid_t pid = fork();
     if (pid == -1) {
-      perror("main()");
+      /*
+       * fork failed.
+       */
+      perror("main() fork() error");
+      exit(EXIT_FAILURE);
     } else if (pid == 0) {
       execl("./set_pipeline_conf.py", "./set_pipeline_conf.py", bmv2_json, p4rt, NULL);
-    } /* else (parent) just continue */
+      /*
+       * exec failed.
+       */
+      perror("main() exec() error");
+      exit(EXIT_FAILURE);
+    } else /* parent */ {
+      int wstatus;
+      pid_t w;
+      do {
+        w = waitpid(pid, &wstatus, 0);
+        if (w == -1) {
+          if (errno == EINTR) {
+            continue;
+          }
+          perror("main() waitpid() error");
+          exit(EXIT_FAILURE);
+        }
+
+        if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) != 0) {
+          fprintf(stderr, "main() error: Child exited with %d\n", WEXITSTATUS(wstatus));
+          exit(EXIT_FAILURE);
+        } else if (WIFSIGNALED(wstatus)) {
+          fprintf(stderr, "main() error: Child killed by signal %d\n", WTERMSIG(wstatus));
+          exit(EXIT_FAILURE);
+        }
+      } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+    }
   }
 
   if (protocols_file) {
