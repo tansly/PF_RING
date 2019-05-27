@@ -47,7 +47,7 @@ def main(argv):
             "hdr.ipv4.srcAddr": argv[3],
             "hdr.ipv4.dstAddr": argv[4]
         },
-        action_name="my_drop",
+        action_name="drop",
         )
     switch_connection.WriteTableEntry(table_entry)
 
