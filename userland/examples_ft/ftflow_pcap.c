@@ -39,6 +39,7 @@
 #include <netinet/ip6.h>
 #include <net/ethernet.h>     /* the L2 protocols */
 #include <arpa/inet.h>
+#include <getopt.h>
 
 #include "pfring_ft.h"
 
@@ -49,7 +50,8 @@
 
 pcap_t *pd = NULL;
 pfring_ft_table *ft = NULL;
-u_int8_t quiet = 0, verbose = 0, do_shutdown = 0, enable_l7 = 0;
+u_int8_t quiet = 0, verbose = 0, do_shutdown = 0, enable_l7 = 0, enable_p4 = 0;
+const char *p4rt = NULL, *bmv2_json = NULL;
 
 static struct timeval startTime;
 unsigned long long numPkts = 0, numBytes = 0;
@@ -189,23 +191,19 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
      * IMO this will be good enough for a PoC. We may later port it here if we think it would
      * provide any benefit.
      *
-     * TODO: Actually check if the protocol is blocked (after adding relevant command line options).
+     * TODO: Actually check if the protocol is blocked.
      */
     pid_t pid = fork();
     if (pid == -1) {
         perror("proto_detected");
     } else if (pid == 0) {
-        /*
-         * TODO: Get the bmv2 json and p4info as command line arguments instead of hardcoding here.
-         */
         char buf1[32], buf2[32];
         char *ip1, *ip2;
         if (flow_key->ip_version == 4) {
             ip1 = _intoa(flow_key->saddr.v4, buf1, sizeof(buf1));
             ip2 = _intoa(flow_key->daddr.v4, buf2, sizeof(buf2));
-            execl("./blocklist_add.py", "./blocklist_add.py",
-                    "/home/vagrant/ntcp4/p4src/ntc.json",
-                    "/home/vagrant/ntcp4/p4src/ntc.p4rt", ip1, ip2, NULL);
+            execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt,
+                ip1, ip2, NULL);
         } else {
             /*
              * XXX: Will we support IPv6?
@@ -252,7 +250,7 @@ void print_help(void) {
 /* *************************************** */
 
 int main(int argc, char* argv[]) {
-  char *device = NULL, c, *bpfFilter = NULL;
+  char *device = NULL, *bpfFilter = NULL;
   char errbuf[PCAP_ERRBUF_SIZE];
   char *protocols_file = NULL;
   int promisc, snaplen = DEFAULT_SNAPLEN;
@@ -263,10 +261,32 @@ int main(int argc, char* argv[]) {
  
   startTime.tv_sec = 0;
 
-  while ((c = getopt(argc,argv,"c:hi:vf:p:q7")) != '?') {
-    if ((c == 255) || (c == -1)) break;
+  static struct option long_opts[] = {
+    {"p4rt", required_argument, NULL, 'r'},
+    {"bmv2-json", required_argument, NULL, 'j'},
+    {"block", required_argument, NULL, 'b'}
+  };
+  int option_index = 0;
+  int c;
+
+  while ((c = getopt_long(argc, argv, "c:hi:vf:p:q7r:j:b:",
+          long_opts, &option_index)) != '?' && c != -1) {
 
     switch(c) {
+    case 'j':
+      // BMv2 JSON file
+      enable_p4 = 1;
+      bmv2_json = optarg;
+      break;
+    case 'r':
+      // P4 runtime file
+      enable_p4 = 1;
+      p4rt = optarg;
+      break;
+    case 'b':
+      // nDPI protocol to be blocked in P4
+      enable_p4 = 1;
+      // TODO: Parse and store the protocol
     case 'c':
       categories_file = strdup(optarg);
       break;
@@ -315,23 +335,24 @@ int main(int argc, char* argv[]) {
 
   pfring_ft_set_flow_export_callback(ft, processFlow, NULL);
 
-  /*
-   * TODO: Set this callback only if L7 detection is enabled and the required
-   * P4 config files are given as command line arguments.
-   */
-  pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
-  pid_t pid = fork();
-  if (pid == -1) {
+  if (enable_p4) {
+    if (!enable_l7) {
+      fputs("P4 control should be enabled together with nDPI (-7)\n", stderr);
+      return -1;
+    }
+    if (!p4rt || !bmv2_json) {
+      fputs("--p4rt and --bmv2-json are mandatory for P4 usage\n", stderr);
+      return -1;
+    }
+
+    pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
+    pid_t pid = fork();
+    if (pid == -1) {
       perror("main()");
-  } else if (pid == 0) {
-      /*
-       * TODO: Get the bmv2 json and p4info as command line arguments instead of
-       * hardcoding here. Also see the previous TODO.
-       */
-      execl("./set_pipeline_conf.py", "./set_pipeline_conf.py",
-              "/home/vagrant/ntcp4/p4src/ntc.json",
-              "/home/vagrant/ntcp4/p4src/ntc.p4rt", NULL);
-  } /* else (parent) just continue */
+    } else if (pid == 0) {
+      execl("./set_pipeline_conf.py", "./set_pipeline_conf.py", bmv2_json, p4rt, NULL);
+    } /* else (parent) just continue */
+  }
 
   if (protocols_file) {
     rc = pfring_ft_load_ndpi_protocols(ft, protocols_file);
@@ -369,7 +390,7 @@ int main(int argc, char* argv[]) {
       printf("pcap_compile error: '%s'\n", pcap_geterr(pd));
     } else {
       if (pcap_setfilter(pd, &fcode) < 0) {
-	printf("pcap_setfilter error: '%s'\n", pcap_geterr(pd));
+        printf("pcap_setfilter error: '%s'\n", pcap_geterr(pd));
       }
     }
   }
