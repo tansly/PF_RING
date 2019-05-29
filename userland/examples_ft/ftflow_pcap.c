@@ -314,13 +314,31 @@ int main(int argc, char* argv[]) {
       p4rt = optarg;
       break;
     case 'b':
-      /* Specifies nDPI protocol to be blocked in P4 */
-      enable_p4 = 1;
-      if (!blocked_protocols) {
-        blocked_protocols = bstree_new(compare_proto_names, NULL);
+      {
+          /* Specifies nDPI protocol to be blocked in P4 */
+          enable_p4 = 1;
+          if (!blocked_protocols) {
+              blocked_protocols = bstree_new(compare_proto_names, NULL);
+          }
+
+          /*
+           * If the user specifies the protocol as "master.app" (as per nDPI convention),
+           * we will separate the string from the '.' and treat the master and
+           * the app protocol as separate protocols.
+           *
+           * We will consider a protocol "blocked" if either the "master" or
+           * "app" protocol is blocked.
+           * XXX: Flawed logic. Rethink this stuff.
+           */
+          char *separator;
+          separator = strchr(optarg, '.');
+          if (separator) {
+              *separator = '\0';
+              bstree_insert(blocked_protocols, separator + 1);
+          }
+          bstree_insert(blocked_protocols, optarg);
+          break;
       }
-      bstree_insert(blocked_protocols, optarg);
-      break;
     case 'c':
       categories_file = strdup(optarg);
       break;
