@@ -184,9 +184,9 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
   pfring_ft_flow_key *flow_key = pfring_ft_flow_get_key(flow);
   pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
 
-  printf("l7: %s, category: %u\n",
+  printf("Detected: %s\n",
       pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
-        sizeof proto_name), flow_value->l7_protocol.category);
+        sizeof proto_name));
 
   /*
    * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
@@ -246,6 +246,9 @@ void process_packet(u_char *_deviceId, const struct pcap_pkthdr *h, const u_char
 
 /* *************************************** */
 
+/*
+ * TODO: Update the help text to include P4 related arguments.
+ */
 void print_help(void) {
   printf("ftflow_pcap - (C) 2018-19 ntop.org\n");
   printf("-h              Print help\n");
@@ -289,17 +292,17 @@ int main(int argc, char* argv[]) {
 
     switch(c) {
     case 'j':
-      // BMv2 JSON file
+      /* Specifies the BMv2 JSON file */
       enable_p4 = 1;
       bmv2_json = optarg;
       break;
     case 'r':
-      // P4 runtime file
+      /* Specifies the P4 runtime file */
       enable_p4 = 1;
       p4rt = optarg;
       break;
     case 'b':
-      // nDPI protocol to be blocked in P4
+      /* Specifies nDPI protocol to be blocked in P4 */
       enable_p4 = 1;
       // TODO: Parse and store the protocol
     case 'c':
