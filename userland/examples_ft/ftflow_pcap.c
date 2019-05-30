@@ -182,7 +182,8 @@ void processFlow(pfring_ft_flow *flow, void *user){
 
 int compare_proto_names(const void *lhs, const void *rhs)
 {
-  return strcmp(lhs, rhs);
+  // TODO: We should probably make this case insensitive.
+  return strcasecmp(lhs, rhs);
 }
 
 void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
