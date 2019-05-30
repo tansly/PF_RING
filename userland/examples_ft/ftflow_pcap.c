@@ -197,8 +197,24 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
       pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
         sizeof proto_name));
 
-  if (!bstree_search(blocked_protocols, proto_name)) {
+  /*
+   * proto_name given by nDPI may be of the form "master.app".
+   * We will block a flow if the user has selected either the master or app.
+   * The user may have also specified the full protocol as "master.app",
+   * so we check for that as well.
+   *
+   * TODO: Refactor this into something reasonable.
+   */
+  char *separator = NULL;
+  if (!(bstree_search(blocked_protocols, proto_name) ||
+        ((separator = strchr(proto_name, '.')) && (*separator = '\0',
+          bstree_search(blocked_protocols, proto_name) ||
+          bstree_search(blocked_protocols, separator + 1))))) {
+    // hmm
     return;
+  }
+  if (separator) {
+    *separator = '.';
   }
 
   printf("Blocking: %s\n", proto_name);
