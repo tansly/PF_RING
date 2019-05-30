@@ -44,6 +44,8 @@
 
 #include "pfring_ft.h"
 
+#include "bstree.h"
+
 #include "ftutils.c"
 
 #define ALARM_SLEEP       1
@@ -53,6 +55,7 @@ pcap_t *pd = NULL;
 pfring_ft_table *ft = NULL;
 u_int8_t quiet = 0, verbose = 0, do_shutdown = 0, enable_l7 = 0, enable_p4 = 0;
 const char *p4rt = NULL, *bmv2_json = NULL;
+struct bstree *blocked_protocols = NULL;
 
 static struct timeval startTime;
 unsigned long long numPkts = 0, numBytes = 0;
@@ -177,6 +180,11 @@ void processFlow(pfring_ft_flow *flow, void *user){
   pfring_ft_flow_free(flow);
 }
 
+int compare_proto_names(const void *lhs, const void *rhs)
+{
+  return strcasecmp(lhs, rhs);
+}
+
 void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
         pfring_ft_flow *flow, void *user)
 {
@@ -189,11 +197,31 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
         sizeof proto_name));
 
   /*
+   * proto_name given by nDPI may be of the form "master.app".
+   * We will block a flow if the user has selected either the master or app.
+   * The user may have also specified the full protocol as "master.app",
+   * so we check for that as well.
+   *
+   * TODO: Refactor this into something reasonable.
+   */
+  char *separator = NULL;
+  if (!(bstree_search(blocked_protocols, proto_name) ||
+        ((separator = strchr(proto_name, '.')) && (*separator = '\0',
+          bstree_search(blocked_protocols, proto_name) ||
+          bstree_search(blocked_protocols, separator + 1))))) {
+    // hmm
+    return;
+  }
+  if (separator) {
+    *separator = '.';
+  }
+
+  printf("Blocking: %s\n", proto_name);
+
+  /*
    * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
    * IMO this will be good enough for a PoC. We may later port it here if we think it would
    * provide any benefit.
-   *
-   * TODO: Actually check if the protocol is blocked.
    */
   pid_t pid = fork();
   if (pid == -1) {
@@ -304,7 +332,11 @@ int main(int argc, char* argv[]) {
     case 'b':
       /* Specifies nDPI protocol to be blocked in P4 */
       enable_p4 = 1;
-      // TODO: Parse and store the protocol
+      if (!blocked_protocols) {
+        blocked_protocols = bstree_new(compare_proto_names, NULL);
+      }
+      bstree_insert(blocked_protocols, optarg);
+      break;
     case 'c':
       categories_file = strdup(optarg);
       break;
