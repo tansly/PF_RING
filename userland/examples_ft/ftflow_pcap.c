@@ -228,13 +228,51 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
     perror("proto_detected() fork() error");
     return;
   } else if (pid == 0) {
-    char buf1[32], buf2[32];
-    char *ip1, *ip2;
+    char saddr_buf[32], daddr_buf[32];
+    char *saddr, *daddr;
+    char sport_buf[6], dport_buf[6]; // 16-bit uint -> 5 chars + NUL
     if (flow_key->ip_version == 4) {
-      ip1 = _intoa(flow_key->saddr.v4, buf1, sizeof(buf1));
-      ip2 = _intoa(flow_key->daddr.v4, buf2, sizeof(buf2));
-      execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt,
-          ip1, ip2, NULL);
+      saddr = _intoa(flow_key->saddr.v4, saddr_buf, sizeof(saddr_buf));
+      daddr = _intoa(flow_key->daddr.v4, daddr_buf, sizeof(daddr_buf));
+
+      if (flow_key->protocol == IPPROTO_TCP || flow_key->protocol == IPPROTO_UDP) {
+        int slen = snprintf(sport_buf, sizeof sport_buf, "%u", flow_key->sport);
+        int dlen = snprintf(dport_buf, sizeof dport_buf, "%u", flow_key->dport);
+
+        /*
+         * These checks are unnecessary because the buffer sizes are sufficient.
+         * Still, I'm adding these just in case I screwed up with my calculations.
+         */
+        if (slen > sizeof sport_buf) {
+#ifndef NDEBUG
+          fprintf(stderr, "WARN_DEBUG: snprintf(sport) returned %d\n", slen);
+#endif
+        }
+        if (dlen > sizeof dport_buf) {
+#ifndef NDEBUG
+          fprintf(stderr, "WARN_DEBUG: snprintf(dport) returned %d\n", dlen);
+#endif
+        }
+      }
+
+      /*
+       * TODO: Add entries for both directions or find a way to make a
+       * bidirectional check in P4 code.
+       */
+      if (flow_key->protocol == IPPROTO_TCP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "TCP",
+          saddr, sport_buf, daddr, dport_buf, NULL);
+      } else if (flow_key->protocol == IPPROTO_UDP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "UDP",
+          saddr, sport_buf, daddr, dport_buf, NULL);
+      } else if (flow_key->protocol == IPPROTO_ICMP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "ICMP",
+          saddr, daddr, NULL);
+      } else {
+        fprintf(stderr, "Unsupported protocol: %u\n", flow_key->protocol);
+        exit(EXIT_FAILURE);
+      }
+
       /*
        * exec failed.
        */
