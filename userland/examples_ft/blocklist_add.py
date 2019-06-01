@@ -52,6 +52,16 @@ def main(argv):
             },
             action_name="drop",
             )
+        table_entry_reverse = p4info_helper.buildTableEntry(
+            table_name="ingress.blocklist_tcp",
+            match_fields={
+                "hdr.ipv4.srcAddr": argv[6],
+                "hdr.tcp.srcPort": int(argv[7]),
+                "hdr.ipv4.dstAddr": argv[4],
+                "hdr.tcp.dstPort": int(argv[5])
+            },
+            action_name="drop",
+            )
     elif argv[3] == 'UDP':
         table_entry = p4info_helper.buildTableEntry(
             table_name="ingress.blocklist_udp",
@@ -60,6 +70,16 @@ def main(argv):
                 "hdr.udp.srcPort": int(argv[5]),
                 "hdr.ipv4.dstAddr": argv[6],
                 "hdr.udp.dstPort": int(argv[7])
+            },
+            action_name="drop",
+            )
+        table_entry_reverse = p4info_helper.buildTableEntry(
+            table_name="ingress.blocklist_udp",
+            match_fields={
+                "hdr.ipv4.srcAddr": argv[6],
+                "hdr.udp.srcPort": int(argv[7]),
+                "hdr.ipv4.dstAddr": argv[4],
+                "hdr.udp.dstPort": int(argv[5])
             },
             action_name="drop",
             )
@@ -72,7 +92,16 @@ def main(argv):
             },
             action_name="drop",
             )
+        table_entry_reverse = p4info_helper.buildTableEntry(
+            table_name="ingress.blocklist_icmp",
+            match_fields={
+                "hdr.ipv4.srcAddr": argv[5],
+                "hdr.ipv4.dstAddr": argv[4],
+            },
+            action_name="drop",
+            )
     switch_connection.WriteTableEntry(table_entry)
+    switch_connection.WriteTableEntry(table_entry_reverse)
 
 if __name__ == "__main__":
     main(sys.argv)
