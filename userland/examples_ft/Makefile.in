@@ -57,8 +57,8 @@ TARGETS = ${FTPROGS}
 
 all: ${TARGETS}
 
-ftflow: ftflow.o ${LIBPFRING}
-	${CC} ${CFLAGS} ftflow.o ${LIBS} -o $@
+ftflow: ftflow.o bstree.o ${LIBPFRING}
+	${CC} ${CFLAGS} ftflow.o bstree.o ${LIBS} -o $@
 
 ftflow_pcap: ftflow_pcap.o bstree.o ${LIBPFRING}
 	${CC} ${CFLAGS} ftflow_pcap.o bstree.o ${LIBS} -o $@

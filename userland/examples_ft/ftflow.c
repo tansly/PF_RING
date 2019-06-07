@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <sched.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
@@ -42,9 +43,12 @@
 #include <arpa/inet.h>
 #include <monetary.h>
 #include <locale.h>
+#include <getopt.h>
 
 #include "pfring.h"
 #include "pfring_ft.h"
+
+#include "bstree.h"
 
 #include "ftutils.c"
 
@@ -55,9 +59,11 @@ pfring *pd = NULL;
 pfring_ft_table *ft = NULL;
 int bind_core = -1;
 int bind_time_pulse_core = -1;
-u_int8_t quiet = 0, verbose = 0, time_pulse = 0, enable_l7 = 0, do_shutdown = 0;
+u_int8_t quiet = 0, verbose = 0, time_pulse = 0, enable_l7 = 0, enable_p4 = 0, do_shutdown = 0;
 u_int64_t num_pkts = 0;
 u_int64_t num_bytes = 0;
+const char *p4rt = NULL, *bmv2_json = NULL;
+struct bstree *blocked_protocols = NULL;
 
 volatile u_int64_t *pulse_timestamp;
 
@@ -225,6 +231,120 @@ void processFlow(pfring_ft_flow *flow, void *user){
   pfring_ft_flow_free(flow);
 }
 
+int compare_proto_names(const void *lhs, const void *rhs)
+{
+  return strcasecmp(lhs, rhs);
+}
+
+void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
+        pfring_ft_flow *flow, void *user)
+{
+  char proto_name[32];
+  pfring_ft_flow_key *flow_key = pfring_ft_flow_get_key(flow);
+  pfring_ft_flow_value *flow_value = pfring_ft_flow_get_value(flow);
+
+  printf("Detected: %s\n",
+      pfring_ft_l7_protocol_name(ft, &flow_value->l7_protocol, proto_name,
+        sizeof proto_name));
+
+  /*
+   * proto_name given by nDPI may be of the form "master.app".
+   * We will block a flow if the user has selected either the master or app.
+   * The user may have also specified the full protocol as "master.app",
+   * so we check for that as well.
+   *
+   * TODO: Refactor this into something reasonable.
+   */
+  char *separator = NULL;
+  if (!(bstree_search(blocked_protocols, proto_name) ||
+        ((separator = strchr(proto_name, '.')) && (*separator = '\0',
+          bstree_search(blocked_protocols, proto_name) ||
+          bstree_search(blocked_protocols, separator + 1))))) {
+    // hmm
+    return;
+  }
+  if (separator) {
+    *separator = '.';
+  }
+
+  printf("Blocking: %s\n", proto_name);
+
+  /*
+   * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
+   * IMO this will be good enough for a PoC. We may later port it here if we think it would
+   * provide any benefit.
+   */
+  pid_t pid = fork();
+  if (pid == -1) {
+    perror("proto_detected() fork() error");
+    return;
+  } else if (pid == 0) {
+    char saddr_buf[32], daddr_buf[32];
+    char *saddr, *daddr;
+    char sport_buf[6], dport_buf[6]; // 16-bit uint -> 5 chars + NUL
+    if (flow_key->ip_version == 4) {
+      saddr = _intoa(flow_key->saddr.v4, saddr_buf, sizeof(saddr_buf));
+      daddr = _intoa(flow_key->daddr.v4, daddr_buf, sizeof(daddr_buf));
+
+      if (flow_key->protocol == IPPROTO_TCP || flow_key->protocol == IPPROTO_UDP) {
+        int slen = snprintf(sport_buf, sizeof sport_buf, "%u", flow_key->sport);
+        int dlen = snprintf(dport_buf, sizeof dport_buf, "%u", flow_key->dport);
+
+        /*
+         * These checks are unnecessary because the buffer sizes are sufficient.
+         * Still, I'm adding these just in case I screwed up with my calculations.
+         */
+        if (slen > sizeof sport_buf) {
+#ifndef NDEBUG
+          fprintf(stderr, "WARN_DEBUG: snprintf(sport) returned %d\n", slen);
+#endif
+        }
+        if (dlen > sizeof dport_buf) {
+#ifndef NDEBUG
+          fprintf(stderr, "WARN_DEBUG: snprintf(dport) returned %d\n", dlen);
+#endif
+        }
+      }
+
+      /*
+       * TODO: Add entries for both directions or find a way to make a
+       * bidirectional check in P4 code.
+       */
+      if (flow_key->protocol == IPPROTO_TCP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "TCP",
+          saddr, sport_buf, daddr, dport_buf, NULL);
+      } else if (flow_key->protocol == IPPROTO_UDP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "UDP",
+          saddr, sport_buf, daddr, dport_buf, NULL);
+      } else if (flow_key->protocol == IPPROTO_ICMP) {
+        execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "ICMP",
+          saddr, daddr, NULL);
+      } else {
+        fprintf(stderr, "Unsupported protocol: %u\n", flow_key->protocol);
+        exit(EXIT_FAILURE);
+      }
+
+      /*
+       * exec failed.
+       */
+      perror("proto_detected() exec() error");
+      exit(EXIT_FAILURE);
+    } else {
+      /*
+       * XXX: Will we support IPv6?
+       */
+      fputs("Got IPv6?", stderr);
+      exit(EXIT_SUCCESS);
+    }
+  } else /* parent */ {
+    /*
+     * TODO: Wait for the child.
+     * Or set SIGCHLD handler to ignore it.
+     * If the child errors, there is nothing we can do anyway.
+     */
+  }
+}
+
 /* ******************************** */
 
 void process_packet(const struct pfring_pkthdr *h, const u_char *p, const u_char *user_bytes) {
@@ -310,6 +430,9 @@ void print_version(void) {
 
 /* *************************************** */
 
+/*
+ * TODO: Update the help text to include P4 related arguments.
+ */
 void print_help(void) {
   printf("ftflow - (C) 2018-19 ntop.org\n");
   printf("Flow processing based on PF_RING FT (Flow Table)\n\n");
@@ -333,7 +456,7 @@ void print_help(void) {
 /* *************************************** */
 
 int main(int argc, char* argv[]) {
-  char *device = NULL, c;
+  char *device = NULL;
   char *configuration_file = NULL;
   char *categories_file = NULL;
   char *protocols_file = NULL;
@@ -342,10 +465,36 @@ int main(int argc, char* argv[]) {
   packet_direction direction = rx_and_tx_direction;
   pthread_t time_thread;
 
-  while ((c = getopt(argc,argv,"c:dg:hi:p:qvF:S:V7")) != '?') {
-    if ((c == 255) || (c == -1)) break;
+  static struct option long_opts[] = {
+    {"p4rt", required_argument, NULL, 'r'},
+    {"bmv2-json", required_argument, NULL, 'j'},
+    {"block", required_argument, NULL, 'b'}
+  };
+  int option_index = 0;
+  int c;
+
+  while ((c = getopt_long(argc, argv, "c:dg:hi:p:qvF:S:V7r:j:b:",
+          long_opts, &option_index)) != '?' && c != -1) {
 
     switch(c) {
+    case 'j':
+      /* Specifies the BMv2 JSON file */
+      enable_p4 = 1;
+      bmv2_json = optarg;
+      break;
+    case 'r':
+      /* Specifies the P4 runtime file */
+      enable_p4 = 1;
+      p4rt = optarg;
+      break;
+    case 'b':
+      /* Specifies nDPI protocol to be blocked in P4 */
+      enable_p4 = 1;
+      if (!blocked_protocols) {
+        blocked_protocols = bstree_new(compare_proto_names, NULL);
+      }
+      bstree_insert(blocked_protocols, optarg);
+      break;
     case 'c':
       enable_l7 = 1;
       categories_file = strdup(optarg);
@@ -426,6 +575,55 @@ int main(int argc, char* argv[]) {
 
   /* Example of callback for expired flows */
   pfring_ft_set_flow_export_callback(ft, processFlow, NULL);
+
+  if (enable_p4) {
+    if (!enable_l7) {
+      fputs("P4 control should be enabled together with nDPI (-7)\n", stderr);
+      return -1;
+    }
+    if (!p4rt || !bmv2_json) {
+      fputs("--p4rt and --bmv2-json are mandatory for P4 usage\n", stderr);
+      return -1;
+    }
+
+    pfring_ft_set_l7_detected_callback(ft, proto_detected, NULL);
+    pid_t pid = fork();
+    if (pid == -1) {
+      /*
+       * fork failed.
+       */
+      perror("main() fork() error");
+      exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+      execl("./set_pipeline_conf.py", "./set_pipeline_conf.py", bmv2_json, p4rt, NULL);
+      /*
+       * exec failed.
+       */
+      perror("main() exec() error");
+      exit(EXIT_FAILURE);
+    } else /* parent */ {
+      int wstatus;
+      pid_t w;
+      do {
+        w = waitpid(pid, &wstatus, 0);
+        if (w == -1) {
+          if (errno == EINTR) {
+            continue;
+          }
+          perror("main() waitpid() error");
+          exit(EXIT_FAILURE);
+        }
+
+        if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) != 0) {
+          fprintf(stderr, "main() error: Child exited with %d\n", WEXITSTATUS(wstatus));
+          exit(EXIT_FAILURE);
+        } else if (WIFSIGNALED(wstatus)) {
+          fprintf(stderr, "main() error: Child killed by signal %d\n", WTERMSIG(wstatus));
+          exit(EXIT_FAILURE);
+        }
+      } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+    }
+  }
 
   /* Example of callback for packets that have been successfully processed
   pfring_ft_set_flow_packet_callback(ft, processFlowPacket, NULL);
