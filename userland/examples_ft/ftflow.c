@@ -308,10 +308,10 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
        * TODO: Add entries for both directions or find a way to make a
        * bidirectional check in P4 code.
        */
-  printf("Blocking: srcIp: %s, dstIp: %s, srcPort: %u, dstPort: %u, protocol: %u, "
+  printf("Blocking %s: srcIp: %s, dstIp: %s, srcPort: %u, dstPort: %u, protocol: %u, "
          "c2s: { Packets: %ju, Bytes: %ju, First: %u.%u, Last: %u.%u }, "
          "s2c: { Packets: %ju, Bytes: %ju, First: %u.%u, Last: %u.%u }\n",
-         saddr, daddr, flow_key->sport, flow_key->dport, flow_key->protocol,
+         proto_name, saddr, daddr, flow_key->sport, flow_key->dport, flow_key->protocol,
          flow_value->direction[s2d_direction].pkts, flow_value->direction[s2d_direction].bytes,
          (u_int) flow_value->direction[s2d_direction].first.tv_sec, (u_int) flow_value->direction[s2d_direction].first.tv_usec,
          (u_int) flow_value->direction[s2d_direction].last.tv_sec,  (u_int) flow_value->direction[s2d_direction].last.tv_usec,
