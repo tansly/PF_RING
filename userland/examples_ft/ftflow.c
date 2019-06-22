@@ -267,8 +267,6 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
     *separator = '.';
   }
 
-  printf("Blocking: %s\n", proto_name);
-
   /*
    * Instead of dealing with P4 runtime C, I will call our good old Python scripts here.
    * IMO this will be good enough for a PoC. We may later port it here if we think it would
@@ -311,12 +309,18 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
        * bidirectional check in P4 code.
        */
       if (flow_key->protocol == IPPROTO_TCP) {
+        printf("Blocking: %s (%s, %s, %s, %s, %s)\n", proto_name, saddr, daddr,
+            "TCP", sport_buf, dport_buf);
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "TCP",
           saddr, sport_buf, daddr, dport_buf, NULL);
       } else if (flow_key->protocol == IPPROTO_UDP) {
+        printf("Blocking: %s (%s, %s, %s, %s, %s)\n", proto_name, saddr, daddr,
+            "UDP", sport_buf, dport_buf);
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "UDP",
           saddr, sport_buf, daddr, dport_buf, NULL);
       } else if (flow_key->protocol == IPPROTO_ICMP) {
+        printf("Blocking: %s (%s, %s, %s)\n", proto_name, saddr, daddr,
+            "ICMP");
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "ICMP",
           saddr, daddr, NULL);
       } else {
