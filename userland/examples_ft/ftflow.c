@@ -308,19 +308,23 @@ void proto_detected(const u_char *data, pfring_ft_packet_metadata *metadata,
        * TODO: Add entries for both directions or find a way to make a
        * bidirectional check in P4 code.
        */
+  printf("Blocking: srcIp: %s, dstIp: %s, srcPort: %u, dstPort: %u, protocol: %u, "
+         "c2s: { Packets: %ju, Bytes: %ju, First: %u.%u, Last: %u.%u }, "
+         "s2c: { Packets: %ju, Bytes: %ju, First: %u.%u, Last: %u.%u }\n",
+         saddr, daddr, flow_key->sport, flow_key->dport, flow_key->protocol,
+         flow_value->direction[s2d_direction].pkts, flow_value->direction[s2d_direction].bytes,
+         (u_int) flow_value->direction[s2d_direction].first.tv_sec, (u_int) flow_value->direction[s2d_direction].first.tv_usec,
+         (u_int) flow_value->direction[s2d_direction].last.tv_sec,  (u_int) flow_value->direction[s2d_direction].last.tv_usec,
+         flow_value->direction[d2s_direction].pkts, flow_value->direction[d2s_direction].bytes,
+         (u_int) flow_value->direction[d2s_direction].first.tv_sec, (u_int) flow_value->direction[d2s_direction].first.tv_usec,
+         (u_int) flow_value->direction[d2s_direction].last.tv_sec,  (u_int) flow_value->direction[d2s_direction].last.tv_usec);
       if (flow_key->protocol == IPPROTO_TCP) {
-        printf("Blocking: %s (%s, %s, %s, %s, %s)\n", proto_name, saddr, daddr,
-            "TCP", sport_buf, dport_buf);
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "TCP",
           saddr, sport_buf, daddr, dport_buf, NULL);
       } else if (flow_key->protocol == IPPROTO_UDP) {
-        printf("Blocking: %s (%s, %s, %s, %s, %s)\n", proto_name, saddr, daddr,
-            "UDP", sport_buf, dport_buf);
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "UDP",
           saddr, sport_buf, daddr, dport_buf, NULL);
       } else if (flow_key->protocol == IPPROTO_ICMP) {
-        printf("Blocking: %s (%s, %s, %s)\n", proto_name, saddr, daddr,
-            "ICMP");
         execl("./blocklist_add.py", "./blocklist_add.py", bmv2_json, p4rt, "ICMP",
           saddr, daddr, NULL);
       } else {
